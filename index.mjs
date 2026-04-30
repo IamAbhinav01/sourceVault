@@ -1,19 +1,23 @@
+#!/usr/bin/env node
+
 // const path = require('path');
 // const fs = require('fs/promises');
 import path from 'path';
 import fs from 'fs/promises';
 import crypto from 'crypto';
-import { timeStamp } from 'console';
-import { json } from 'stream/consumers';
 import { diffLines } from 'diff';
 import chalk from 'chalk';
+import { Command } from 'commander';
+
+const program = new Command();
+
 class SourceVault {
   constructor(repoPath = '.') {
     this.repoPath = path.join(repoPath, '.vault');
     this.objectPath = path.join(this.repoPath, 'objects');
     this.headPath = path.join(this.repoPath, 'HEAD');
     this.indexPath = path.join(this.repoPath, 'index');
-    this.init();
+    this.ready = this.init();
   }
   /* structure of git
 .git/
@@ -59,6 +63,7 @@ class SourceVault {
     return crypto.createHash('sha1').update(context, 'utf-8').digest('hex');
   }
   async add(fileNeededToAdd) {
+    await this.ready;
     const fileData = await fs.readFile(fileNeededToAdd, { encoding: 'utf-8' });
     const fileHash = this.hashObject(fileData);
     console.log(fileHash);
@@ -76,6 +81,7 @@ class SourceVault {
     await fs.writeFile(this.indexPath, JSON.stringify(index));
   }
   async commit(message) {
+    await this.ready;
     const index = JSON.parse(
       await fs.readFile(this.indexPath, { encoding: 'utf-8' })
     );
@@ -94,6 +100,7 @@ class SourceVault {
     console.log(`Commit successfuly created at :${commitHash}`);
   }
   async getCurrentHead() {
+    await this.ready;
     try {
       return await fs.readFile(this.headPath, { encoding: 'utf-8' });
     } catch (error) {
@@ -103,6 +110,7 @@ class SourceVault {
   }
 
   async log() {
+    await this.ready;
     let currentCommitHash = await this.getCurrentHead();
     while (currentCommitHash) {
       const commitData = JSON.parse(
@@ -117,6 +125,7 @@ class SourceVault {
     }
   }
   async showCommitDiff(commitHash) {
+    await this.ready;
     const sanitizedHash = String(commitHash).trim();
     const commitData = await this.getCommitData(sanitizedHash);
     if (!commitData) {
@@ -170,10 +179,12 @@ class SourceVault {
     }
   }
   async getFileContent(fileHash) {
+    await this.ready;
     const objectPath = path.join(this.objectPath, fileHash);
     return fs.readFile(objectPath, { encoding: 'utf-8' });
   }
   async getCommitData(commitHash) {
+    await this.ready;
     const sanitizedHash = String(commitHash).trim();
     const commitPath = path.join(this.objectPath, sanitizedHash);
     try {
@@ -186,10 +197,58 @@ class SourceVault {
     }
   }
 }
-(async () => {
-  const sourcevault = new SourceVault();
-  //   await sourcevault.add('sample.txt');
-  //   await sourcevault.commit('second commit');
-  await sourcevault.showCommitDiff(' b718430c32929b7a989eaaf68a8174161bd4d407');
-  await sourcevault.log();
-})();
+program.version('1.0.0');
+
+program
+  .command('add <file>')
+  .description('Add a file to the vault')
+  .action(async (file) => {
+    const vault = new SourceVault(process.cwd());
+    await vault.add(file);
+  });
+
+program
+  .command('commit <message>')
+  .description('Create a new commit from staged files')
+  .action(async (message) => {
+    const vault = new SourceVault(process.cwd());
+    await vault.commit(message);
+  });
+
+program
+  .command('log')
+  .description('Show commit history')
+  .action(async () => {
+    const vault = new SourceVault(process.cwd());
+    await vault.log();
+  });
+
+program
+  .command('diff <commitHash>')
+  .description('Show the diff for a commit')
+  .action(async (commitHash) => {
+    const vault = new SourceVault(process.cwd());
+    await vault.showCommitDiff(commitHash);
+  });
+
+program
+  .command('head')
+  .description('Show the current HEAD commit hash')
+  .action(async () => {
+    const vault = new SourceVault(process.cwd());
+    const head = await vault.getCurrentHead();
+    console.log(head ? `HEAD: ${head}` : 'No commits yet');
+  });
+
+program
+  .command('init')
+  .description('Initialize a SourceVault in this directory')
+  .action(async () => {
+    new SourceVault(process.cwd());
+    console.log('Initialized SourceVault in .vault/');
+  });
+
+program.parseAsync(process.argv).catch((error) => {
+  console.error(chalk.red(error.message));
+  process.exit(1);
+});
